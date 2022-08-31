@@ -1,4 +1,4 @@
-# v4l2py
+# v4l2py - Bent for use in a work project. I will not maintain this
 
 Video for linux 2 (V4L2) python library
 
