@@ -102,6 +102,7 @@ def frame_sizes(fd, pixel_formats):
         val.height = h
         res = []
         for index in range(128):
+            val.index = index
             try:
                 fcntl.ioctl(fd, IOC.ENUM_FRAMEINTERVALS.value, val)
             except OSError as error:
@@ -109,7 +110,6 @@ def frame_sizes(fd, pixel_formats):
                     break
                 else:
                     raise
-            val.index = index
             # values come in frame interval (fps = 1/interval)
             try:
                 ftype = FrameIntervalType(val.type)
@@ -155,11 +155,27 @@ def frame_sizes(fd, pixel_formats):
     sizes = []
     for pixel_format in pixel_formats:
         size.pixel_format = pixel_format
-        fcntl.ioctl(fd, IOC.ENUM_FRAMESIZES.value, size)
-        if size.type == FrameSizeType.DISCRETE:
-            sizes += get_frame_intervals(
-                pixel_format, size.discrete.width, size.discrete.height
-            )
+        size.index = 0
+        while True:
+            try:
+                fcntl.ioctl(fd, IOC.ENUM_FRAMESIZES.value, size)
+            except OSError:
+                break
+            if size.type == FrameSizeType.DISCRETE:
+                sizes += get_frame_intervals(
+                    pixel_format,
+                    size.discrete.width,
+                    size.discrete.height
+                )
+            elif size.type == FrameSizeType.STEPWISE:
+                sizes += get_frame_intervals(
+                    pixel_format,
+                    size.stepwise.maxwidth,
+                    size.stepwise.maxheight
+                )
+                log.warning("Stepwise frame sizes reported. Getting only the "
+                            "highest resolution one")
+            size.index += 1
     return sizes
 
 
@@ -169,7 +185,7 @@ def read_capabilities(fd):
     return caps
 
 
-def read_info(fd):
+def read_info(fd) -> Info:
     caps = read_capabilities(fd)
     version_tuple = (
         (caps.version & 0xFF0000) >> 16,
@@ -498,6 +514,11 @@ class Buffers:
             for buff in self.buffers:
                 buff.close()
             self.buffers = None
+        r = raw.v4l2_requestbuffers()
+        r.count = 0
+        r.type = self.buffer_type
+        r.memory = self.memory
+        self._ioctl(IOC.REQBUFS, r)
 
     def raw_read(self):
         buff = self.buffers[0]._v4l2_buffer()
